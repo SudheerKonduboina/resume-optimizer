@@ -290,24 +290,39 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* SEMANTIC MATCH PREVIEW */}
-              {result.keyword_analysis.semantic_hits?.length > 0 && (
+                            {/* SEMANTIC MATCH PREVIEW */}
+              {Array.isArray(result.keyword_analysis.semantic_matches) &&
+                result.keyword_analysis.semantic_matches.length > 0 && (
                 <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 lg:p-10 shadow-sm">
-                   <h3 className="text-2xl font-bold mb-8 flex items-center gap-3">
-                      <div className="bg-indigo-100 p-2 rounded-xl text-indigo-600"><Target size={24}/></div>
-                      Semantic Context Matches
-                    </h3>
-                    <div className="grid md:grid-cols-2 gap-4">
-                      {result.keyword_analysis.semantic_hits.slice(0, 4).map((hit: any, i: number) => (
+                  <h3 className="text-2xl font-bold mb-8 flex items-center gap-3">
+                    <div className="bg-indigo-100 p-2 rounded-xl text-indigo-600">
+                      <Target size={24} />
+                    </div>
+                    Semantic Context Matches
+                  </h3>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {result.keyword_analysis.semantic_matches.slice(0, 4).map((hit: any, i: number) => {
+                      const scoreNum = Number(hit?.score);
+                      const pct = Number.isFinite(scoreNum) ? Math.round(scoreNum * 100) : null;
+
+                      return (
                         <div key={i} className="p-5 rounded-2xl bg-slate-50 border border-slate-100">
                           <div className="flex justify-between items-center mb-2">
-                            <span className="font-bold text-indigo-600 text-sm uppercase">{hit.keyword}</span>
-                            <span className="text-[10px] font-black text-slate-400">{(hit.score * 100).toFixed(0)}% Match</span>
+                            <span className="font-bold text-indigo-600 text-sm uppercase">
+                              {hit?.keyword || "—"}
+                            </span>
+                            <span className="text-[10px] font-black text-slate-400">
+                              {pct === null ? "—" : `${pct}% Match`}
+                            </span>
                           </div>
-                          <p className="text-xs text-slate-500 italic line-clamp-2">"...{hit.best_line}..."</p>
+                          <p className="text-xs text-slate-500 italic line-clamp-2">
+                            {hit?.best_line ? `"…${hit.best_line}…"` : `"…"`}
+                          </p>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 

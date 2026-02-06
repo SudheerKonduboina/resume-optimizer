@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import os
 import uuid
 import asyncio
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from slowapi import Limiter
@@ -20,22 +21,26 @@ from app.services.parse import parse_resume
 from app.services.keywords import extract_jd_keywords, keyword_match, semantic_match
 from app.services.scoring import content_signals, compute_scores, build_suggestions
 from app.services.report import render_html_report
+from app.services.report_pdf import build_pdf
+
+ENV = os.getenv("ENV", "dev").lower()
+IS_PROD = ENV in {"prod", "production"}
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# Rate limiter
-limiter = Limiter(key_func=get_remote_address, default_limits=[])
-
-app = FastAPI(
-    title="ATS Resume Optimizer (Open-Source)",
-    version="0.1.0",
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["5/day"] if IS_PROD else [],
 )
+
+rate_limit = limiter.limit("5/day") if IS_PROD else (lambda fn: fn)
+
+app = FastAPI(title="ATS Resume Optimizer (Open-Source)", version="0.1.0")
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 
-# CORS for Next.js local dev
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -44,7 +49,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory job store (OK for demo assignment)
 jobs: dict[str, Job] = {}
 
 
@@ -63,7 +67,6 @@ def set_status(job: Job, state: str, progress: int, message: str, error: Optiona
 def _jd_is_too_short(jd: Optional[str]) -> bool:
     if not jd:
         return True
-    # basic guard against "string" or tiny JD
     return len(jd.strip().split()) < 12
 
 
@@ -75,7 +78,7 @@ async def run_analysis(job: Job, file_path: str, jd: Optional[str]):
         set_status(job, "analyzing", 35, "Analyzing keywords...")
         jd_keywords = []
         kw = {"present": [], "missing": [], "coverage": 0.0}
-        sem = {"semantic_hits": [], "semantic_misses": []}
+        sem = {"semantic_hits": [], "semantic_misses": [], "semantic_coverage": 0.0, "semantic_matches": []}
 
         if jd and not _jd_is_too_short(jd):
             jd_keywords = extract_jd_keywords(jd)
@@ -85,12 +88,22 @@ async def run_analysis(job: Job, file_path: str, jd: Optional[str]):
 
         set_status(job, "analyzing", 60, "Scoring resume...")
         signals = content_signals(resume_text)
-        scores = compute_scores(kw["coverage"], len(sem.get("semantic_hits", [])), fmt_flags, signals)
+
+        scores = compute_scores(
+            kw.get("coverage", 0.0),
+            sem.get("semantic_coverage", 0.0),
+            fmt_flags,
+            signals,
+        )
 
         set_status(job, "generating_report", 80, "Generating report...")
-        suggestions = build_suggestions(fmt_flags, kw.get("missing", []), sem.get("semantic_misses", []), signals)
+        suggestions = build_suggestions(
+            fmt_flags,
+            kw.get("missing", []),
+            sem.get("semantic_misses", []),
+            signals,
+        )
 
-        # If JD was provided but too short, add a nice hint
         if jd and _jd_is_too_short(jd):
             suggestions["items"].insert(
                 0,
@@ -112,8 +125,13 @@ async def run_analysis(job: Job, file_path: str, jd: Optional[str]):
                 "missing": kw.get("missing", []),
                 "coverage": kw.get("coverage", 0.0),
                 "jd_keywords": jd_keywords,
+
                 "semantic_hits": sem.get("semantic_hits", []),
                 "semantic_misses": sem.get("semantic_misses", []),
+                "semantic_coverage": sem.get("semantic_coverage", 0.0),
+
+                # ✅ IMPORTANT FOR FRONTEND
+                "semantic_matches": sem.get("semantic_matches", []),
             },
             "formatting_flags": fmt_flags,
             "suggestions": suggestions,
@@ -127,10 +145,6 @@ async def run_analysis(job: Job, file_path: str, jd: Optional[str]):
         set_status(job, "error", 100, "Failed", error=str(e))
 
 
-# -------------------------
-# Routes
-# -------------------------
-
 @app.get("/", tags=["default"])
 def root():
     return {"status": "ok", "service": "ATS Resume Optimizer", "docs": "/docs"}
@@ -138,29 +152,24 @@ def root():
 
 @app.get("/health", tags=["default"])
 def health():
-    return {"ok": True}
+    return {"ok": True, "env": ENV, "rate_limit_enabled": IS_PROD}
 
 
-# IMPORTANT:
-# Keep response_model=None here to avoid UploadFile/Pydantic edge issues on some setups.
 @app.post("/api/analyze", response_model=None, tags=["default"])
-@limiter.limit("5/day")
+@rate_limit
 async def analyze(
     request: Request,
     resume: UploadFile = File(...),
     job_description: Optional[str] = Form(None),
 ):
-    # Validate extension
     ext = Path(resume.filename).suffix.lower()
     if ext not in ALLOWED_EXT:
         raise HTTPException(status_code=400, detail="Only PDF or DOCX supported.")
 
-    # Validate size
     contents = await resume.read()
     if len(contents) > MAX_FILE_BYTES:
         raise HTTPException(status_code=400, detail="File too large (max 10MB).")
 
-    # Save to disk
     job_id = str(uuid.uuid4())
     safe_name = f"{job_id}{ext}"
     file_path = str(UPLOAD_DIR / safe_name)
@@ -168,12 +177,10 @@ async def analyze(
     with open(file_path, "wb") as f:
         f.write(contents)
 
-    # Create job
     job = Job(job_id=job_id, filename=resume.filename)
     jobs[job_id] = job
     set_status(job, "queued", 5, "Queued")
 
-    # Run in background task
     asyncio.create_task(run_analysis(job, file_path, job_description))
 
     return AnalyzeResponse(status=True, job_id=job_id).model_dump()
@@ -184,7 +191,6 @@ def status(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
     return StatusResponse(status=True, job_id=job_id, **job.status)
 
 
@@ -193,11 +199,8 @@ def result(job_id: str):
     job = jobs.get(job_id)
     if not job or not job.result:
         raise HTTPException(status_code=404, detail="Result not found")
-
     return JobResult(**job.result)
 
-
-from app.services.report_pdf import build_pdf
 
 @app.get("/api/download/{job_id}", tags=["default"])
 def download(job_id: str):
@@ -210,15 +213,5 @@ def download(job_id: str):
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="ATS_Report_{job_id}.pdf"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="ATS_Report_{job_id}.pdf"'},
     )
-
-import os
-
-ENV = os.getenv("ENV", "dev")
-if ENV != "dev":
-    enforce_rate_limit(ip)
-    
-print("ENV =", os.getenv("ENV"))
