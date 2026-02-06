@@ -13,7 +13,7 @@ jobs:
         working-directory: backend
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -27,12 +27,10 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio httpx
 
-      # Optional: if spaCy model is needed in CI
-      - name: Download spaCy model
-        run: |
-          python -m spacy download en_core_web_sm
+      # ❌ Do NOT download spaCy model in CI
+      # CI validates logic, not NLP model correctness
 
-      - name: Run tests
+      - name: Run backend tests
         env:
           ENV: prod
-        run: pytest -q
+        run: pytest -v
