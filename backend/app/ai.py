@@ -25,6 +25,13 @@ _STOP = {
     "must", "should", "role", "position", "job"
 }
 
+# extra JD/resume junk words (helps reduce noise)
+_JUNK_PHRASES = {
+    "job title", "location", "type", "requirements", "must have", "job description",
+    "responsibilities", "requirement", "the job poster", "can start immediately",
+    "remote setting", "fte", "full time", "contract", "internship"
+}
+
 _SKILL_PATTERNS = [
     "aws", "azure", "gcp", "google cloud", "kubernetes", "docker", "jenkins", "github actions",
     "gitlab ci", "terraform", "ansible", "helm", "argocd", "gitops", "prometheus", "grafana",
@@ -54,18 +61,59 @@ def _unique_keep_order(items: List[str]) -> List[str]:
     return out
 
 
+def _is_junk_line(s: str) -> bool:
+    low = s.lower()
+    if len(low) < 3:
+        return True
+    if low in {"resume", "curriculum vitae"}:
+        return True
+    # reject pure headers
+    if low in {"skills", "experience", "education", "summary", "projects"}:
+        return True
+    # reject obvious boilerplate
+    for jp in _JUNK_PHRASES:
+        if jp in low:
+            return True
+    return False
+
+
 def _resume_lines(text: str) -> List[str]:
-    # Keep only useful-ish lines (avoid empty, 1-char, etc.)
-    lines = []
+    """
+    Keep lines that are useful for semantic matching:
+    - bullet lines
+    - tool lists
+    - short-but-meaningful lines (>=3 chars)
+    """
+    lines: List[str] = []
     for ln in (text or "").splitlines():
         s = ln.strip()
-        if len(s) < 6:
+        if not s:
             continue
-        # reduce very noisy lines
-        if s.lower() in {"resume", "curriculum vitae"}:
+
+        # keep bullet lines even if short
+        is_bullet = s.startswith(("-", "•", "*"))
+
+        # clean bullet prefix for matching readability
+        if is_bullet:
+            s = s.lstrip("-•*").strip()
+
+        if _is_junk_line(s):
             continue
+
+        # allow shorter lines if they look technical
+        if len(s) < 10:
+            if any(tok in s.lower() for tok in ["aws", "gcp", "ci", "cd", "sql", "git", "k8", "docker", "terraform"]):
+                lines.append(s)
+            continue
+
         lines.append(s)
-    return lines
+
+    # fallback: if filtering removed too much, keep raw split lines
+    if len(lines) < 8:
+        raw = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+        lines = raw[:200]
+
+    return lines[:260]
 
 
 def extract_skills(text: str, max_terms: int = 80) -> List[str]:
@@ -109,6 +157,8 @@ def extract_skills(text: str, max_terms: int = 80) -> List[str]:
             continue
         if all(w in _STOP for w in x.split()):
             continue
+        if any(j in x for j in _JUNK_PHRASES):
+            continue
         cleaned.append(x)
 
     return cleaned[:max_terms]
@@ -136,6 +186,7 @@ def exact_keyword_match(resume_text: str, jd_keywords: List[str]) -> Dict[str, A
 
     present = _unique_keep_order(present)
     missing = _unique_keep_order(missing)
+
     total = len(present) + len(missing)
     coverage = round((len(present) / total) * 100.0, 2) if total > 0 else 0.0
 
@@ -147,13 +198,6 @@ def semantic_match(
     resume_text: str,
     threshold: float = 0.62,
 ) -> Dict[str, Any]:
-    """
-    ✅ Returns BOTH:
-      - semantic_hits: list[str]
-      - semantic_misses: list[str]
-      - semantic_matches: list[{keyword, score(0..1), best_line}]
-      - semantic_coverage: float (0..100)
-    """
     jd_terms = _unique_keep_order([_norm_term(x) for x in (jd_terms or []) if _norm_term(x)])
     if not jd_terms:
         return {"semantic_hits": [], "semantic_misses": [], "semantic_matches": [], "semantic_coverage": 0.0}
@@ -164,18 +208,16 @@ def semantic_match(
 
     model = _embedder()
 
-    # Embed JD terms and resume lines (so we can return BEST LINE)
     jd_emb = model.encode(jd_terms, convert_to_tensor=True, normalize_embeddings=True)
     line_emb = model.encode(lines, convert_to_tensor=True, normalize_embeddings=True)
 
-    sims = util.cos_sim(jd_emb, line_emb)  # shape: [len(jd_terms), len(lines)]
+    sims = util.cos_sim(jd_emb, line_emb)
 
     semantic_hits: List[str] = []
     semantic_misses: List[str] = []
     semantic_matches: List[Dict[str, Any]] = []
 
     for i, term in enumerate(jd_terms):
-        # best line
         best_score = float(sims[i].max())
         best_idx = int(sims[i].argmax())
         best_line = lines[best_idx] if 0 <= best_idx < len(lines) else ""
@@ -183,11 +225,7 @@ def semantic_match(
         if best_score >= float(threshold):
             semantic_hits.append(term)
             semantic_matches.append(
-                {
-                    "keyword": term,
-                    "score": round(best_score, 4),
-                    "best_line": best_line,
-                }
+                {"keyword": term, "score": round(best_score, 4), "best_line": best_line}
             )
         else:
             semantic_misses.append(term)
@@ -198,7 +236,6 @@ def semantic_match(
     total = len(semantic_hits) + len(semantic_misses)
     semantic_coverage = round((len(semantic_hits) / total) * 100.0, 2) if total > 0 else 0.0
 
-    # Sort best matches first (so UI shows strongest)
     semantic_matches.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
 
     return {

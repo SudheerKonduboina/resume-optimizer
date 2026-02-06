@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import uuid
 import asyncio
@@ -167,6 +165,7 @@ async def analyze(
         raise HTTPException(status_code=400, detail="Only PDF or DOCX supported.")
 
     contents = await resume.read()
+    await resume.close()
     if len(contents) > MAX_FILE_BYTES:
         raise HTTPException(status_code=400, detail="File too large (max 10MB).")
 
