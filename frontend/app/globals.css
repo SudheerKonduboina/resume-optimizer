@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme tokens (LiteCompute-like: clean + premium + blue/purple + teal accents) */
+:root {
+  --ink: 15 23 42;          /* slate-900 */
+  --muted: 100 116 139;     /* slate-500 */
+  --line: 2 6 23;           /* slate-950-ish */
+
+  --brandBlue: 46 67 243;   /* ~ #2E43F3 */
+  --brandPurple: 124 52 234;/* ~ #7C34EA */
+  --brandTeal: 19 166 196;  /* ~ #13A6C4 */
+  --brandCyan: 56 199 215;  /* ~ #38C7D7 */
+
+  --glass: 18 24 38;        /* deep slate */
+}
+
+body {
+  background: #ffffff;
+  color: rgb(var(--ink));
+}
+
+/* Subtle hero tint (no copyrighted background image) */
+.hero-sheen {
+  background:
+    radial-gradient(900px 420px at 18% 0%, rgba(46,67,243,0.18), transparent 60%),
+    radial-gradient(900px 420px at 82% 0%, rgba(124,52,234,0.16), transparent 60%),
+    radial-gradient(650px 320px at 55% 30%, rgba(56,199,215,0.12), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,0.65), rgba(255,255,255,1));
+}
+
+/* Dark overlay panel inside hero for contrast */
+.hero-panel {
+  background:
+    radial-gradient(800px 260px at 20% 0%, rgba(46,67,243,0.20), transparent 60%),
+    radial-gradient(800px 260px at 80% 0%, rgba(124,52,234,0.16), transparent 60%),
+    rgba(10, 14, 25, 0.74);
+  border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(10px);
+}
+
+/* Glass stats like in the vibe */
+.glass-card {
+  background: rgba(18, 24, 38, 0.55);
+  border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: 0 18px 60px rgba(0,0,0,0.25);
+  backdrop-filter: blur(12px);
+}
+
+/* Primary CTA gradient (blue → teal) */
+.btn-primary {
+  background: linear-gradient(90deg, rgba(46,67,243,1) 0%, rgba(19,166,196,1) 100%);
+}
+
+/* Secondary CTA gradient (blue → purple) */
+.btn-accent {
+  background: linear-gradient(90deg, rgba(46,67,243,1) 0%, rgba(124,52,234,1) 55%, rgba(168,43,230,1) 100%);
+}
+
+.pill {
+  border-radius: 9999px;
+}
+
+/* subtle UI animation */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-up {
+  animation: fadeUp 420ms ease-out both;
+}
+
+.hover-lift {
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 22px 70px rgba(2, 6, 23, 0.14);
+}
