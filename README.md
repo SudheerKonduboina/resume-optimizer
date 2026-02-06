@@ -87,7 +87,7 @@ resume-optimizer/
 └── README.md
 
 
-## ⚙️ Environment Requirements
+### ⚙️ Environment Requirements
 - Docker Desktop (Windows / Mac / Linux)
 - Node.js 18+ (for local frontend development)
 - Python 3.11 (for local backend development)
