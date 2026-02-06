@@ -317,7 +317,7 @@ export default function Page() {
                             </span>
                           </div>
                           <p className="text-xs text-slate-500 italic line-clamp-2">
-                            {hit?.best_line ? `"…${hit.best_line}…"` : `"…"`}
+                            “{hit.best_line ? hit.best_line : "No matching resume line found"}”
                           </p>
                         </div>
                       );
